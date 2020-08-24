@@ -34,6 +34,7 @@ vector<int> leaflayout;
 bool enable_below_detect(false);
 
 float calGrid(int x, int y);
+GRID calGRID(int x, int y);
 
 int main(int argc, char **argv)
 {
@@ -60,7 +61,7 @@ int main(int argc, char **argv)
     pcl::PassThrough<PointT> pf(false); //false表示不想管被删除的索引
     pf.setInputCloud(cloud);
     pf.setFilterFieldName("z");
-    pf.setFilterLimits(0.1, 0.9); //只保留小车高度内的点
+    pf.setFilterLimits(-0.1, 0.9); //只保留小车高度内的点
     PointCloud::Ptr cloud_pf(new PointCloud);
     pf.filter(*cloud_pf);
 
@@ -98,7 +99,7 @@ int main(int argc, char **argv)
     cout << "divisionbox:" << endl;
     cout << divisionbox << endl;
     cout << "leaflayout size: " << leaflayout.size() << endl;
-    int area = (divisionbox[0] * divisionbox[1]);
+
     string mapname = "map_out";
     pcl::io::savePCDFile(mapname + ".pcd", *cloud_vpf);
 
@@ -110,13 +111,29 @@ int main(int argc, char **argv)
     {
         for (unsigned int x = 0; x < divisionbox[0]; x++)
         {
-            float occ = calGrid(x, divisionbox[1] - y - 1);
-            if (occ <= 0.036)
-                fputc(254, out);
-            else if (occ >= 0.1)
+            // float occ = calGrid(x, divisionbox[1] - y - 1);
+            // if (occ <= 0.036)
+            //     fputc(254, out);
+            // else if (occ >= 0.1)
+            //     fputc(000, out);
+            // else
+            //     fputc(205, out);
+            GRID grid=calGRID(x,divisionbox[1]-y-1);
+            switch (grid)
+            {
+            case OCCUPY:
                 fputc(000, out);
-            else
+                break;
+            case FREE:
+                fputc(254, out);
+                break;
+            case UNKNOW:
                 fputc(205, out);
+                break;
+            
+            default:
+                break;
+            }
         }
     }
     fclose(out);
@@ -126,20 +143,6 @@ int main(int argc, char **argv)
             mapfile.c_str(), leafsize, leafsize * minbox[0], leafsize * minbox[1], 0.0);
     fclose(yaml);
 
-    // auto co1 = vf.getGridCoordinates(-20.146, 5.6345, 0.45882);
-    // cout << "-20.146,5.6345,0.45882 " << co1 << endl;
-
-    // co1[0] += 565;
-    // co1[1] += 113;
-    // co1[2] += 12;
-    // auto l = leaflayout.at(co1[2] * 919 * 262 + co1[1] * 919 + co1[0]);
-    // cout << "l for -20.146,5.6345,0.45882 " << l << endl;
-
-    // auto co2 = vf.getGridCoordinates(-20.096, 5.6345, 0.55882);
-    // cout << "-20.096,5.6345,0.55882" << co2 << endl;
-    // float occ = calGrid(162, 225);
-    // float occ2 = calGrid(163, 225);
-
     cout << "have already finished" << endl;
     pcl::visualization::CloudViewer viewer("Cloud Viewer");
 
@@ -147,9 +150,6 @@ int main(int argc, char **argv)
 
     while (!viewer.wasStopped())
     {
-        //you can also do cool processing here
-        //FIXME: Note that this is running in a separate thread from viewerPsycho
-        //and you should guard against race conditions yourself...
         user_data++;
     }
     return 0;
@@ -158,27 +158,9 @@ int main(int argc, char **argv)
 //计算第（x,y）体素格子对应的value
 float calGrid(int x, int y)
 {
-    // bool below(false); //below为true则表示有低于地平面的点
-    // cout << x << " " << y << endl;
     static int m = divisionbox[0] * divisionbox[1];
     static int n = divisionbox[0];
     int count = 0;
-    // static int z_floor_min = abs(minbox[2]);
-    // static int z_floor_max = z_floor_min + 2;
-    // static int z_max = divisionbox[2];
-    // if (enable_below_detect)
-    // {
-    //     for (size_t z = 0; z < z_floor_min; z++)
-    //     {
-    //         //检测有无地板以下的点
-    //         if (leaflayout.at(z * m + y * n + x) != -1)
-    //             {
-    //                 below = true;
-    //                 break;
-    //             }
-    //     }
-    // }
-
     for (size_t z = 0; z < divisionbox[2]; z++)
     {
         if (leaflayout.at(z * m + y * n + x) != -1)
@@ -186,12 +168,39 @@ float calGrid(int x, int y)
             count++;
         }
     }
-    float occ = (float)count / divisionbox[2];
+    float occ = static_cast<float>(count) / divisionbox[2];
     return occ;
-    // if (occ >= 0.1)
-    //     return OCCUPY;
-    // else if (occ <= 0.036)
-    //     return FREE;
-    // else
-    //     return UNKNOW;
+}
+
+GRID calGRID(int x, int y)
+{
+    static int m = divisionbox[0] * divisionbox[1];
+    static int n = divisionbox[0];
+    int count = 0;
+    bool floor(false);//floor为true说明，是有地板的。
+    static int z_floor_max = 2 * abs(minbox[2]) + 1;
+    static int z_max = divisionbox[2];
+    for (size_t z = z_floor_max; z < z_max; z++)
+    {
+        if (leaflayout.at(z * m + y * n + x) != -1)
+        {
+            count++;
+        }
+    }
+    float occ = static_cast<float>(count) / (z_max - z_floor_max);
+    for (size_t z = 0; z < z_floor_max; z++)
+    {
+        if(leaflayout.at(z*m+y*n+x)!=-1)
+        {
+            floor=true;
+            break;
+        }
+    }
+
+    if (occ >= 0.1)
+        return OCCUPY;
+    else if (occ <= 0.036 && floor)
+        return FREE;
+    else
+        return UNKNOW;
 }
