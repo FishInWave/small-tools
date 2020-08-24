@@ -33,7 +33,7 @@ Eigen::Vector3i divisionbox;
 vector<int> leaflayout;
 bool enable_below_detect(false);
 
-GRID calGrid(int x, int y);
+float calGrid(int x, int y);
 
 int main(int argc, char **argv)
 {
@@ -60,7 +60,7 @@ int main(int argc, char **argv)
     pcl::PassThrough<PointT> pf(false); //false表示不想管被删除的索引
     pf.setInputCloud(cloud);
     pf.setFilterFieldName("z");
-    pf.setFilterLimits(-0.5, 1.8); //只保留小车高度内的点
+    pf.setFilterLimits(0.1, 0.9); //只保留小车高度内的点
     PointCloud::Ptr cloud_pf(new PointCloud);
     pf.filter(*cloud_pf);
 
@@ -110,19 +110,13 @@ int main(int argc, char **argv)
     {
         for (unsigned int x = 0; x < divisionbox[0]; x++)
         {
-            GRID grid = calGrid(x, divisionbox[1] - y - 1);
-            switch (grid)
-            {
-            case OCCUPY:
-                fputc(000, out);
-                break;
-            case FREE:
+            float occ = calGrid(x, divisionbox[1] - y - 1);
+            if (occ <= 0.036)
                 fputc(254, out);
-            case UNKNOW:
+            else if (occ >= 0.1)
+                fputc(000, out);
+            else
                 fputc(205, out);
-            default:
-                break;
-            }
         }
     }
     fclose(out);
@@ -162,54 +156,42 @@ int main(int argc, char **argv)
 }
 
 //计算第（x,y）体素格子对应的value
-GRID calGrid(int x, int y)
+float calGrid(int x, int y)
 {
-    bool below(false); //below为true则表示有低于地平面的点
+    // bool below(false); //below为true则表示有低于地平面的点
     // cout << x << " " << y << endl;
     static int m = divisionbox[0] * divisionbox[1];
     static int n = divisionbox[0];
     int count = 0;
-    static int z_floor_min = abs(minbox[2]);
-    static int z_floor_max = z_floor_min + 2;
-    static int z_max = divisionbox[2];
-    if (enable_below_detect)
-    {
-        for (size_t z = 0; z < z_floor_min; z++)
-        {
-            //检测有无地板以下的点
-            if (leaflayout.at(z * m + y * n + x) != -1)
-                {
-                    below = true;
-                    break;
-                }
-        }
-    }
+    // static int z_floor_min = abs(minbox[2]);
+    // static int z_floor_max = z_floor_min + 2;
+    // static int z_max = divisionbox[2];
+    // if (enable_below_detect)
+    // {
+    //     for (size_t z = 0; z < z_floor_min; z++)
+    //     {
+    //         //检测有无地板以下的点
+    //         if (leaflayout.at(z * m + y * n + x) != -1)
+    //             {
+    //                 below = true;
+    //                 break;
+    //             }
+    //     }
+    // }
 
-    for (size_t z = z_floor_max; z < z_max; z++)
+    for (size_t z = 0; z < divisionbox[2]; z++)
     {
         if (leaflayout.at(z * m + y * n + x) != -1)
         {
             count++;
         }
     }
-
-    for (size_t z = z_floor_min; z < z_floor_max; z++)
-    {
-        
-    }
-    
-    float occ = (float)count / (z_max-z_floor_max);
-    if (below || occ >= 0.1)
-        return OCCUPY;
-    else if (occ <= 0.036)
-        return FREE;
-    else
-        return UNKNOW;
+    float occ = (float)count / divisionbox[2];
+    return occ;
+    // if (occ >= 0.1)
+    //     return OCCUPY;
+    // else if (occ <= 0.036)
+    //     return FREE;
+    // else
+    //     return UNKNOW;
 }
-
-// if (occ <= 0.036)
-//     fputc(254, out);
-// else if (occ >= 0.1)
-//     fputc(000, out);
-// else
-//     fputc(205, out);
