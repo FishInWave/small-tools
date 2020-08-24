@@ -34,7 +34,8 @@ vector<int> leaflayout;
 bool enable_below_detect(false);
 
 float calGrid(int x, int y);
-GRID calGRID(int x, int y);
+GRID calGridFloor(int x, int y);
+GRID calGridBelow(int x, int y);
 
 int main(int argc, char **argv)
 {
@@ -61,7 +62,10 @@ int main(int argc, char **argv)
     pcl::PassThrough<PointT> pf(false); //false表示不想管被删除的索引
     pf.setInputCloud(cloud);
     pf.setFilterFieldName("z");
-    pf.setFilterLimits(-0.1, 0.9); //只保留小车高度内的点
+    //不考虑floor，（0.1,0.9），调用calGrid
+    //只考虑floor，（-0.1,0.9），调用calGridFloor
+    //考虑floor和below，（-0.4,0.9）,调用calGridBelow
+    pf.setFilterLimits(-0.4, 0.9); //只保留小车高度内的点
     PointCloud::Ptr cloud_pf(new PointCloud);
     pf.filter(*cloud_pf);
 
@@ -118,7 +122,7 @@ int main(int argc, char **argv)
             //     fputc(000, out);
             // else
             //     fputc(205, out);
-            GRID grid=calGRID(x,divisionbox[1]-y-1);
+            GRID grid = calGridBelow(x, divisionbox[1] - y - 1);
             switch (grid)
             {
             case OCCUPY:
@@ -130,7 +134,7 @@ int main(int argc, char **argv)
             case UNKNOW:
                 fputc(205, out);
                 break;
-            
+
             default:
                 break;
             }
@@ -172,12 +176,12 @@ float calGrid(int x, int y)
     return occ;
 }
 
-GRID calGRID(int x, int y)
+GRID calGridFloor(int x, int y)
 {
     static int m = divisionbox[0] * divisionbox[1];
     static int n = divisionbox[0];
     int count = 0;
-    bool floor(false);//floor为true说明，是有地板的。
+    bool floor(false); //floor为true说明，是有地板的。
     static int z_floor_max = 2 * abs(minbox[2]) + 1;
     static int z_max = divisionbox[2];
     for (size_t z = z_floor_max; z < z_max; z++)
@@ -190,14 +194,57 @@ GRID calGRID(int x, int y)
     float occ = static_cast<float>(count) / (z_max - z_floor_max);
     for (size_t z = 0; z < z_floor_max; z++)
     {
-        if(leaflayout.at(z*m+y*n+x)!=-1)
+        if (leaflayout.at(z * m + y * n + x) != -1)
         {
-            floor=true;
+            floor = true;
             break;
         }
     }
 
     if (occ >= 0.1)
+        return OCCUPY;
+    else if (occ <= 0.036 && floor)
+        return FREE;
+    else
+        return UNKNOW;
+}
+
+GRID calGridBelow(int x, int y)
+{
+    static int m = divisionbox[0] * divisionbox[1];
+    static int n = divisionbox[0];
+    int count = 0;
+    bool floor(false); //floor为true说明，是有地板的。
+    bool below(false);
+    static int z_floor_min = abs(minbox[2]) - 2;
+    static int z_floor_max = z_floor_min + 5;
+    static int z_max = divisionbox[2];
+    for (size_t z = z_floor_max; z < z_max; z++)
+    {
+        if (leaflayout.at(z * m + y * n + x) != -1)
+        {
+            count++;
+        }
+    }
+    float occ = static_cast<float>(count) / (z_max - z_floor_max);
+    for (size_t z = z_floor_min; z < z_floor_max; z++)
+    {
+        if (leaflayout.at(z * m + y * n + x) != -1)
+        {
+            floor = true;
+            break;
+        }
+    }
+    for (size_t z = 0; z < z_floor_min; z++)
+    {
+        if (leaflayout.at(z * m + y * n + x) != -1)
+        {
+            below = true;
+            break;
+        }
+    }
+
+    if (occ >= 0.1 || below)
         return OCCUPY;
     else if (occ <= 0.036 && floor)
         return FREE;
