@@ -33,20 +33,23 @@ Eigen::Vector3i divisionbox;
 vector<int> leaflayout;
 bool enable_below_detect(false);
 
-float calGrid(int x, int y);
+GRID calGrid(int,int);
+// float calGrid(int x, int y);
 GRID calGridFloor(int x, int y);
 GRID calGridBelow(int x, int y);
+GRID calGridBelowWithoutFloor(int,int);
 
 int main(int argc, char **argv)
 {
-    std::string pcd_name;
-    if (argc >= 2)
+    std::string pcd_name,out_name;
+    if (argc >= 3)
     {
         pcd_name = argv[1];
+        out_name = argv[2];
     }
     else
     {
-        PCL_WARN("You must add a pcd file name");
+        PCL_WARN("You must add a pcd file name and out name");
         return 0;
     }
 
@@ -65,7 +68,7 @@ int main(int argc, char **argv)
     //不考虑floor，（0.1,0.9），调用calGrid
     //只考虑floor，（-0.1,0.9），调用calGridFloor
     //考虑floor和below，（-0.4,0.9）,调用calGridBelow
-    pf.setFilterLimits(-0.4, 0.9); //只保留小车高度内的点
+    pf.setFilterLimits(-0.1, 0.9); //只保留小车高度内的点
     PointCloud::Ptr cloud_pf(new PointCloud);
     pf.filter(*cloud_pf);
 
@@ -104,11 +107,10 @@ int main(int argc, char **argv)
     cout << divisionbox << endl;
     cout << "leaflayout size: " << leaflayout.size() << endl;
 
-    string mapname = "map_out";
-    pcl::io::savePCDFile(mapname + ".pcd", *cloud_vpf);
+    pcl::io::savePCDFile(out_name + ".pcd", *cloud_vpf);
 
     //打印
-    string mapfile = mapname + ".pgm";
+    string mapfile = out_name + ".pgm";
     FILE *out = fopen(mapfile.c_str(), "w");
     fprintf(out, "P5\n# CREATOR: map_saver.cpp %.3f m/pix\n%d %d\n255\n", leafsize, divisionbox[0], divisionbox[1]);
     for (unsigned int y = 0; y < divisionbox[1]; y++)
@@ -122,7 +124,7 @@ int main(int argc, char **argv)
             //     fputc(000, out);
             // else
             //     fputc(205, out);
-            GRID grid = calGridBelow(x, divisionbox[1] - y - 1);
+            GRID grid = calGridBelowWithoutFloor(x, divisionbox[1] - y - 1);
             switch (grid)
             {
             case OCCUPY:
@@ -141,7 +143,7 @@ int main(int argc, char **argv)
         }
     }
     fclose(out);
-    string yamlname = mapname + ".yaml";
+    string yamlname = out_name + ".yaml";
     FILE *yaml = fopen(yamlname.c_str(), "w");
     fprintf(yaml, "image: %s\nresolution: %f\norigin: [%f, %f, %f]\nnegate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\n\n",
             mapfile.c_str(), leafsize, leafsize * minbox[0], leafsize * minbox[1], 0.0);
@@ -160,7 +162,22 @@ int main(int argc, char **argv)
 }
 
 //计算第（x,y）体素格子对应的value
-float calGrid(int x, int y)
+// float calGrid(int x, int y)
+// {
+//     static int m = divisionbox[0] * divisionbox[1];
+//     static int n = divisionbox[0];
+//     int count = 0;
+//     for (size_t z = 0; z < divisionbox[2]; z++)
+//     {
+//         if (leaflayout.at(z * m + y * n + x) != -1)
+//         {
+//             count++;
+//         }
+//     }
+//     float occ = static_cast<float>(count) / divisionbox[2];
+//     return occ;
+// }
+GRID calGrid(int x, int y)
 {
     static int m = divisionbox[0] * divisionbox[1];
     static int n = divisionbox[0];
@@ -173,13 +190,19 @@ float calGrid(int x, int y)
         }
     }
     float occ = static_cast<float>(count) / divisionbox[2];
-    return occ;
+    if (occ >= 0.1)
+        return OCCUPY;
+    else if (occ <= 0.036)
+        return FREE;
+    else
+        return UNKNOW;
 }
 
+//计算正负两格。
 GRID calGridFloor(int x, int y)
 {
     static int m = divisionbox[0] * divisionbox[1];
-    static int n = divisionbox[0];
+    static int n = divisionbox[0];    // else if (occ <= 0.036 && floor)
     int count = 0;
     bool floor(false); //floor为true说明，是有地板的。
     static int z_floor_max = 2 * abs(minbox[2]) + 1;
@@ -209,6 +232,51 @@ GRID calGridFloor(int x, int y)
         return UNKNOW;
 }
 
+GRID calGridBelowWithoutFloor(int x, int y)
+{
+    static int m = divisionbox[0] * divisionbox[1];
+    static int n = divisionbox[0];
+    int count = 0;
+    bool floor(false); //floor为true说明，是有地板的。
+    bool below(false);
+    //地面是+-0.05则为-1，+3
+    //地面是+-0.1，则为-2，5
+    static int z_floor_min = abs(minbox[2]) - 1;
+    static int z_floor_max = z_floor_min + 3;
+    static int z_max = divisionbox[2];
+    for (size_t z = z_floor_max; z < z_max; z++)
+    {
+        if (leaflayout.at(z * m + y * n + x) != -1)
+        {
+            count++;
+        }
+    }
+    float occ = static_cast<float>(count) / (z_max - z_floor_max);
+    for (size_t z = z_floor_min; z < z_floor_max; z++)
+    {
+        if (leaflayout.at(z * m + y * n + x) != -1)
+        {
+            floor = true;
+            break;
+        }
+    }
+    for (size_t z = 0; z < z_floor_min; z++)
+    {
+        if (leaflayout.at(z * m + y * n + x) != -1)
+        {
+            below = true;
+            break;
+        }
+    }
+
+    if (occ >= 0.25 || below)
+        return OCCUPY;
+    else if (occ <=0.036)
+        return FREE;
+    else
+        return UNKNOW;
+}
+
 GRID calGridBelow(int x, int y)
 {
     static int m = divisionbox[0] * divisionbox[1];
@@ -216,8 +284,10 @@ GRID calGridBelow(int x, int y)
     int count = 0;
     bool floor(false); //floor为true说明，是有地板的。
     bool below(false);
-    static int z_floor_min = abs(minbox[2]) - 2;
-    static int z_floor_max = z_floor_min + 5;
+    //地面是+-0.05则为-1，+3
+    //地面是+-0.1，则为-2，5
+    static int z_floor_min = abs(minbox[2]) - 1;
+    static int z_floor_max = z_floor_min + 3;
     static int z_max = divisionbox[2];
     for (size_t z = z_floor_max; z < z_max; z++)
     {
