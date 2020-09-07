@@ -1,8 +1,7 @@
 /**
  * @file mapdown.cpp
- * @author Yu-wei XU
- * @brief  用于将3d的pcd文件降维成2d的pgm文件，并附带相应的yaml
- * @usage  输入input file和output name,同一路径下应当包含config.yaml
+ * @author your name (you@domain.com)
+ * @brief 
  * @version 0.1
  * @date 2020-09-07
  * 
