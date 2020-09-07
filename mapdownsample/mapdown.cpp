@@ -1,4 +1,13 @@
-/** 这个代码可以作为学习体素滤波的资料。
+/**
+ * @file mapdown.cpp
+ * @author Yu-wei XU
+ * @brief  用于将3d的pcd文件降维成2d的pgm文件，并附带相应的yaml
+ * @usage  输入input file和output name,同一路径下应当包含config.yaml
+ * @version 0.1
+ * @date 2020-09-07
+ * 
+ * @copyright Copyright (c) 2020
+ * 
  */
 
 //pcl
@@ -14,11 +23,23 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+//third party
+#include "yaml-cpp/yaml.h"
 
 int user_data;
 using namespace std;
 using PointT = pcl::PointXYZI;
 using PointCloud = pcl::PointCloud<PointT>;
+
+Eigen::Vector3i minbox;
+Eigen::Vector3i maxbox;
+Eigen::Vector3i divisionbox;
+vector<int> leaflayout;
+bool enable_below_detect(false);
+float leafsize = 0.05;
+float pf_height_min = 0.1;
+float pf_height_max = 0.9;
+unsigned int mode = 1;
 
 enum GRID
 {
@@ -27,21 +48,16 @@ enum GRID
     UNKNOW
 };
 
-Eigen::Vector3i minbox;
-Eigen::Vector3i maxbox;
-Eigen::Vector3i divisionbox;
-vector<int> leaflayout;
-bool enable_below_detect(false);
-
-GRID calGrid(int,int);
-// float calGrid(int x, int y);
+GRID calGrid(int, int);
 GRID calGridFloor(int x, int y);
 GRID calGridBelow(int x, int y);
-GRID calGridBelowWithoutFloor(int,int);
+GRID calGridBelowWithoutFloor(int, int);
+void filters(PointCloud::Ptr, PointCloud::Ptr);
+void parseYamlFile();
 
 int main(int argc, char **argv)
 {
-    std::string pcd_name,out_name;
+    std::string pcd_name, out_name;
     if (argc >= 3)
     {
         pcd_name = argv[1];
@@ -49,65 +65,20 @@ int main(int argc, char **argv)
     }
     else
     {
-        PCL_WARN("You must add a pcd file name and out name");
+        PCL_WARN("You must add a pcd file name and an out name");
         return 0;
     }
 
     PointCloud::Ptr cloud(new PointCloud);
     pcl::io::loadPCDFile(pcd_name, *cloud);
 
-    //SLAM时已经考虑了激光雷达高度了，因此滤波时，直接按照实际高度删即可
-    const float h_vehicle = 0.9226; //测于scout1.0,雷达中心
-    const float h_tolerance = 0.3;
     cout << "original: " << cloud->size() << endl;
 
-    //高程滤波
-    pcl::PassThrough<PointT> pf(false); //false表示不想管被删除的索引
-    pf.setInputCloud(cloud);
-    pf.setFilterFieldName("z");
-    //不考虑floor，（0.1,0.9），调用calGrid
-    //只考虑floor，（-0.1,0.9），调用calGridFloor
-    //考虑floor和below，（-0.4,0.9）,调用calGridBelow
-    pf.setFilterLimits(-0.1, 0.9); //只保留小车高度内的点
-    PointCloud::Ptr cloud_pf(new PointCloud);
-    pf.filter(*cloud_pf);
+    parseYamlFile();
+    PointCloud::Ptr cloud_filtered(new PointCloud);
+    filters(cloud, cloud_filtered);
 
-    cout << "height " << cloud_pf->size() << endl;
-    //统计学滤波
-    pcl::StatisticalOutlierRemoval<PointT> sf;
-    sf.setMeanK(25);
-    sf.setStddevMulThresh(0.5);
-    sf.setInputCloud(cloud_pf);
-    PointCloud::Ptr cloud_spf(new PointCloud);
-    pcl::console::TicToc tt;
-    tt.tic();
-    sf.filter(*cloud_spf);
-    cout << "statistic spend " << tt.toc() << " ms" << endl;
-    cout << "statistic " << cloud_spf->size() << endl;
-
-    const float leafsize = 0.05;
-    //体素化
-    pcl::VoxelGrid<PointT> vf;
-    vf.setInputCloud(cloud_spf);
-    vf.setLeafSize(leafsize, leafsize, leafsize);
-    PointCloud::Ptr cloud_vpf(new PointCloud);
-    vf.setSaveLeafLayout(true);
-    vf.filter(*cloud_vpf);
-    cout << "voxel: " << cloud_vpf->size() << endl;
-    minbox = vf.getMinBoxCoordinates();
-    maxbox = vf.getMaxBoxCoordinates();
-    divisionbox = vf.getNrDivisions();
-    leaflayout = vf.getLeafLayout();
-    auto size = leaflayout.size();
-    cout << "minbox:" << endl;
-    cout << minbox << endl;
-    cout << "maxbox:" << endl;
-    cout << maxbox << endl;
-    cout << "divisionbox:" << endl;
-    cout << divisionbox << endl;
-    cout << "leaflayout size: " << leaflayout.size() << endl;
-
-    pcl::io::savePCDFile(out_name + ".pcd", *cloud_vpf);
+    pcl::io::savePCDFile(out_name + ".pcd", *cloud_filtered);
 
     //打印
     string mapfile = out_name + ".pgm";
@@ -117,14 +88,22 @@ int main(int argc, char **argv)
     {
         for (unsigned int x = 0; x < divisionbox[0]; x++)
         {
-            // float occ = calGrid(x, divisionbox[1] - y - 1);
-            // if (occ <= 0.036)
-            //     fputc(254, out);
-            // else if (occ >= 0.1)
-            //     fputc(000, out);
-            // else
-            //     fputc(205, out);
-            GRID grid = calGridBelowWithoutFloor(x, divisionbox[1] - y - 1);
+            GRID grid;
+            switch (mode)
+            {
+            case 1:
+                grid = calGrid(x, divisionbox[1] - y - 1);
+                break;
+            case 2:
+                grid = calGridBelowWithoutFloor(x, divisionbox[1] - y - 1);
+                break;
+            case 3:
+                grid = calGridBelow(x, divisionbox[1] - y - 1);
+                break;
+            default:
+                break;
+            }
+
             switch (grid)
             {
             case OCCUPY:
@@ -152,7 +131,7 @@ int main(int argc, char **argv)
     cout << "have already finished" << endl;
     pcl::visualization::CloudViewer viewer("Cloud Viewer");
 
-    viewer.showCloud(cloud_vpf);
+    viewer.showCloud(cloud_filtered);
 
     while (!viewer.wasStopped())
     {
@@ -160,23 +139,13 @@ int main(int argc, char **argv)
     }
     return 0;
 }
-
-//计算第（x,y）体素格子对应的value
-// float calGrid(int x, int y)
-// {
-//     static int m = divisionbox[0] * divisionbox[1];
-//     static int n = divisionbox[0];
-//     int count = 0;
-//     for (size_t z = 0; z < divisionbox[2]; z++)
-//     {
-//         if (leaflayout.at(z * m + y * n + x) != -1)
-//         {
-//             count++;
-//         }
-//     }
-//     float occ = static_cast<float>(count) / divisionbox[2];
-//     return occ;
-// }
+/**
+ * @brief 仅考虑地面上空的占有
+ * 
+ * @param x 
+ * @param y 
+ * @return GRID 
+ */
 GRID calGrid(int x, int y)
 {
     static int m = divisionbox[0] * divisionbox[1];
@@ -198,11 +167,17 @@ GRID calGrid(int x, int y)
         return UNKNOW;
 }
 
-//计算正负两格。
+/**
+ * @brief 计算0上下各两个格子视为floor，并考虑地面上方的占有。
+ * 
+ * @param x 
+ * @param y 
+ * @return GRID 
+ */
 GRID calGridFloor(int x, int y)
 {
     static int m = divisionbox[0] * divisionbox[1];
-    static int n = divisionbox[0];    // else if (occ <= 0.036 && floor)
+    static int n = divisionbox[0];
     int count = 0;
     bool floor(false); //floor为true说明，是有地板的。
     static int z_floor_max = 2 * abs(minbox[2]) + 1;
@@ -231,13 +206,18 @@ GRID calGridFloor(int x, int y)
     else
         return UNKNOW;
 }
-
+/**
+ * @brief 不考虑floor，而是被floor隔开的两部分
+ * 
+ * @param x 
+ * @param y 
+ * @return GRID 
+ */
 GRID calGridBelowWithoutFloor(int x, int y)
 {
     static int m = divisionbox[0] * divisionbox[1];
     static int n = divisionbox[0];
     int count = 0;
-    bool floor(false); //floor为true说明，是有地板的。
     bool below(false);
     //地面是+-0.05则为-1，+3
     //地面是+-0.1，则为-2，5
@@ -252,14 +232,6 @@ GRID calGridBelowWithoutFloor(int x, int y)
         }
     }
     float occ = static_cast<float>(count) / (z_max - z_floor_max);
-    for (size_t z = z_floor_min; z < z_floor_max; z++)
-    {
-        if (leaflayout.at(z * m + y * n + x) != -1)
-        {
-            floor = true;
-            break;
-        }
-    }
     for (size_t z = 0; z < z_floor_min; z++)
     {
         if (leaflayout.at(z * m + y * n + x) != -1)
@@ -271,12 +243,18 @@ GRID calGridBelowWithoutFloor(int x, int y)
 
     if (occ >= 0.25 || below)
         return OCCUPY;
-    else if (occ <=0.036)
+    else if (occ <= 0.036)
         return FREE;
     else
         return UNKNOW;
 }
-
+/**
+ * @brief 考虑below，floor，和上方
+ * 
+ * @param x 
+ * @param y 
+ * @return GRID 
+ */
 GRID calGridBelow(int x, int y)
 {
     static int m = divisionbox[0] * divisionbox[1];
@@ -321,3 +299,64 @@ GRID calGridBelow(int x, int y)
     else
         return UNKNOW;
 }
+/**
+ * @brief 导入yaml文件，并赋值相关变量。
+ */
+void parseYamlFile()
+{
+    YAML::Node node = YAML::LoadFile("./config.yaml");
+    leafsize = node["voxel"]["leafsize"].as<float>();
+    mode = node["mode"].as<unsigned int>();
+    pf_height_max = node["passthrough"]["height_max"].as<float>();
+    pf_height_min = node["passthrough"]["height_min"].as<float>();
+}
+/**
+ * @brief 包含了高程滤波，离散点滤波和体素滤波。
+ * 
+ * @param input 
+ * @param output 
+ */
+void filters(PointCloud::Ptr input, PointCloud::Ptr output)
+{
+    //高程滤波
+    pcl::PassThrough<PointT> pf(false); //false表示不想管被删除的索引
+    pf.setInputCloud(input);
+    pf.setFilterFieldName("z");
+    pf.setFilterLimits(pf_height_min, pf_height_max); //只保留小车高度内的点
+    PointCloud::Ptr cloud_pf(new PointCloud);
+    pf.filter(*cloud_pf);
+
+    cout << "height " << cloud_pf->size() << endl;
+    //统计学滤波
+    pcl::StatisticalOutlierRemoval<PointT> sf;
+    sf.setMeanK(25);
+    sf.setStddevMulThresh(0.5);
+    sf.setInputCloud(cloud_pf);
+    PointCloud::Ptr cloud_spf(new PointCloud);
+    pcl::console::TicToc tt;
+    tt.tic();
+    sf.filter(*cloud_spf);
+    cout << "statistic spend " << tt.toc() << " ms" << endl;
+    cout << "statistic " << cloud_spf->size() << endl;
+
+    //体素化,目的是为了建立索引
+    pcl::VoxelGrid<PointT> vf;
+    vf.setInputCloud(cloud_spf);
+    vf.setLeafSize(leafsize, leafsize, leafsize);
+    vf.setSaveLeafLayout(true);
+    vf.filter(*output);
+    cout << "voxel: " << output->size() << endl;
+    minbox = vf.getMinBoxCoordinates();
+    maxbox = vf.getMaxBoxCoordinates();
+    divisionbox = vf.getNrDivisions();
+    leaflayout = vf.getLeafLayout();
+    auto size = leaflayout.size();
+    cout << "minbox:" << endl;
+    cout << minbox << endl;
+    cout << "maxbox:" << endl;
+    cout << maxbox << endl;
+    cout << "divisionbox:" << endl;
+    cout << divisionbox << endl;
+    cout << "leaflayout size: " << leaflayout.size() << endl;
+}
+

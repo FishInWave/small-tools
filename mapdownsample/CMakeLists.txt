@@ -10,3 +10,4 @@ add_definitions(${PCL_DEFINITIONS})
 
 add_executable (mapdown mapdown.cpp)
 target_link_libraries (mapdown ${PCL_LIBRARIES})
+target_link_libraries (mapdown libyaml-cpp.so)
