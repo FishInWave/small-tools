@@ -80,8 +80,8 @@ main (int argc, char** argv)
 
   std::vector<pcl::PointIndices> cluster_indices;
   pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
-  ec.setClusterTolerance (0.1); // 2cm
-  ec.setMinClusterSize (20);
+  ec.setClusterTolerance (0.25); // 2cm
+  ec.setMinClusterSize (40);
   ec.setMaxClusterSize (100);
   ec.setSearchMethod (tree);
   ec.setInputCloud (cloud_filtered);

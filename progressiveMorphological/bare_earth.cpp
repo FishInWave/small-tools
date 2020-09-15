@@ -1,3 +1,14 @@
+ /**
+ * @file bare_earth.cpp
+ * @author Yu-wei XU
+ * @brief 官方例程，修改了一些参数，用于拟合出地面。
+ * 
+ * @version 0.1
+ * @date 2020-09-10
+ * 
+ * @copyright Copyright (c) 2020
+ * 
+ */
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
 #include <pcl/filters/extract_indices.h>

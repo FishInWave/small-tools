@@ -17,7 +17,7 @@ main (int argc, char** argv)
   // Read in the cloud data
   pcl::PCDReader reader;
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>), cloud_f (new pcl::PointCloud<pcl::PointXYZ>);
-  reader.read (argv[1], *cloud);
+  reader.read ("key_frame_0.pcd", *cloud);
   std::cout << "PointCloud before filtering has: " << cloud->size () << " data points." << std::endl; //*
 
   // Create the filtering object: downsample the dataset using a leaf size of 1cm
@@ -81,7 +81,7 @@ main (int argc, char** argv)
   std::vector<pcl::PointIndices> cluster_indices;
   pcl::EuclideanClusterExtraction<pcl::PointXYZ> ec;
   ec.setClusterTolerance (0.1); // 2cm
-  ec.setMinClusterSize (20);
+  ec.setMinClusterSize (10);
   ec.setMaxClusterSize (100);
   ec.setSearchMethod (tree);
   ec.setInputCloud (cloud_filtered);
