@@ -6,3 +6,4 @@ build/
 *.pgm
 *.vscode
 .history/
+!*.yaml
